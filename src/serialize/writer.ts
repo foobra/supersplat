@@ -120,6 +120,53 @@ class DownloadWriter implements Writer {
     }
 }
 
+// send the finished buffer to an HTTP endpoint with a POST
+class HttpWriter implements Writer {
+    write: (data: Uint8Array) => void;
+    close: () => Promise<Response>;
+    succeeded = false;
+
+    constructor(
+        private url: string,
+        private filename: string,
+        private headers: Record<string, string> = {},
+        private useMultipart = true
+    ) {
+        const bufferWriter = new BufferWriter();
+
+        this.write = (data: Uint8Array) => {
+            bufferWriter.write(data);
+        };
+
+        this.close = async () => {
+            const buffers = bufferWriter.close();
+            const blob = new Blob(buffers, { type: 'application/octet-stream' });
+
+            const response = await fetch(this.url, {
+                method: 'POST',
+                headers: this.useMultipart ? this.headers : {
+                    'Content-Type': 'application/octet-stream',
+                    ...this.headers
+                },
+                body: this.useMultipart ?
+                    (() => {
+                        const form = new FormData();
+                        form.append('file', new File([blob], this.filename || 'upload.ply', { type: 'application/octet-stream' }));
+                        return form;
+                    })() :
+                    blob
+            });
+
+            if (!response.ok) {
+                throw new Error(`Upload failed (${response.status} ${response.statusText})`);
+            }
+
+            this.succeeded = true;
+            return response;
+        };
+    }
+}
+
 // compress the incoming stream with gzip
 class GZipWriter implements Writer {
     write: (data: Uint8Array) => void;
@@ -177,4 +224,4 @@ class ProgressWriter implements Writer {
     }
 }
 
-export { Writer, FileStreamWriter, BufferWriter, DownloadWriter, GZipWriter, ProgressWriter };
+export { Writer, FileStreamWriter, BufferWriter, DownloadWriter, HttpWriter, GZipWriter, ProgressWriter };

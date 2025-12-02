@@ -5,7 +5,7 @@ import { ElementType } from './element';
 import { Events } from './events';
 import { AssetSource } from './loaders/asset-source';
 import { Scene } from './scene';
-import { DownloadWriter, FileStreamWriter } from './serialize/writer';
+import { DownloadWriter, FileStreamWriter, HttpWriter, Writer } from './serialize/writer';
 import { Splat } from './splat';
 import { serializePly, serializePlyCompressed, SerializeSettings, serializeSplat, serializeViewer, ViewerExportSettings } from './splat-serialize';
 import { localize } from './ui/localization';
@@ -539,7 +539,7 @@ const initFileHandler = (scene: Scene, events: Events, dropTarget: HTMLElement) 
         }
     });
 
-    events.function('scene.write', async (fileType: FileType, options: SceneExportOptions, stream?: FileSystemWritableFileStream) => {
+    events.function('scene.write', async (fileType: FileType, options: SceneExportOptions, stream?: FileSystemWritableFileStream | Writer) => {
         events.fire('startSpinner');
 
         try {
@@ -550,7 +550,7 @@ const initFileHandler = (scene: Scene, events: Events, dropTarget: HTMLElement) 
 
             const { filename, splatIdx, serializeSettings, viewerExportSettings } = options;
 
-            const writer = stream ? new FileStreamWriter(stream) : new DownloadWriter(filename);
+            const writer = stream && 'write' in stream ? stream : (stream ? new FileStreamWriter(stream as FileSystemWritableFileStream) : new DownloadWriter(filename));
 
             try {
                 const splats = splatIdx === 'all' ? getSplats() : [getSplats()[splatIdx]];
@@ -584,6 +584,103 @@ const initFileHandler = (scene: Scene, events: Events, dropTarget: HTMLElement) 
             });
         } finally {
             events.fire('stopSpinner');
+        }
+    });
+
+    const requestPlyExportOptions = async (): Promise<SceneExportOptions | null> => {
+        const splats = getSplats();
+        if (splats.length === 0) {
+            return null;
+        }
+
+        const options = await events.invoke('show.exportPopup', 'ply', splats.map(s => s.name), true) as SceneExportOptions;
+        return options ?? null;
+    };
+
+    const getConfiguredServerUploadUrl = (): string | null => {
+        const configured = scene.config.serverUploadUrl?.trim();
+        return configured ? configured : null;
+    };
+
+    const promptServerUploadUrl = (): string | null => {
+        // eslint-disable-next-line no-alert -- prompt keeps the UX simple for the upload URL.
+        return window.prompt('Enter an HTTP POST URL to save the exported PLY', 'http://localhost:8000/upload')?.trim() ?? null;
+    };
+
+    events.function('scene.saveToServer', async () => {
+        const options = await requestPlyExportOptions();
+        if (!options) {
+            return;
+        }
+
+        let endpoint = getConfiguredServerUploadUrl();
+        if (!endpoint) {
+            endpoint = promptServerUploadUrl();
+        }
+
+        if (!endpoint) {
+            return;
+        }
+
+        const fileType = options.compressedPly ? 'compressedPly' : 'ply';
+        const writer = new HttpWriter(endpoint, options.filename, {
+            'X-Supersplat-Filename': options.filename
+        });
+
+        await events.invoke('scene.write', fileType, options, writer);
+        if (writer.succeeded) {
+            await events.invoke('showPopup', {
+                type: 'info',
+                header: 'Upload complete',
+                message: `${options.filename} uploaded to ${endpoint}`
+            });
+        }
+    });
+
+    events.function('scene.saveToDirectory', async () => {
+        if (!window.showDirectoryPicker) {
+            await events.invoke('showPopup', {
+                type: 'error',
+                header: localize('popup.error'),
+                message: 'Saving directly to a directory requires the File System Access API.'
+            });
+            return;
+        }
+
+        const options = await requestPlyExportOptions();
+        if (!options) {
+            return;
+        }
+
+        try {
+            const dirHandle = await window.showDirectoryPicker({
+                id: 'SuperSplatDirectorySave',
+                mode: 'readwrite'
+            });
+
+            const fileHandle = await dirHandle.getFileHandle(options.filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            const fileType = options.compressedPly ? 'compressedPly' : 'ply';
+
+            await events.invoke('scene.write', fileType, options, new FileStreamWriter(writable));
+
+            await events.invoke('showPopup', {
+                type: 'info',
+                header: 'Saved',
+                message: `${options.filename} written to ${dirHandle.name}`
+            });
+        } catch (error: unknown) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+
+            console.error(error);
+            const message = error instanceof Error ? error.message : String(error);
+            await events.invoke('showPopup', {
+                type: 'error',
+                header: localize('popup.error'),
+                message
+            });
         }
     });
 };

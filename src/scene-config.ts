@@ -40,7 +40,8 @@ const sceneConfig = {
     },
     debug: {
         showBound: false
-    }
+    },
+    serverUploadUrl: ''
 };
 
 type SceneConfig = typeof sceneConfig;

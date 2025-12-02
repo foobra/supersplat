@@ -192,6 +192,16 @@ class Menu extends Container {
             isEnabled: () => !events.invoke('scene.empty'),
             onSelect: async () => await events.invoke('doc.saveAs')
         }, {
+            text: localize('menu.file.save-to-directory'),
+            icon: createSvg(sceneSave),
+            isEnabled: () => !events.invoke('scene.empty'),
+            onSelect: () => events.invoke('scene.saveToDirectory')
+        }, {
+            text: localize('menu.file.save-to-server'),
+            icon: createSvg(scenePublish),
+            isEnabled: () => !events.invoke('scene.empty'),
+            onSelect: () => events.invoke('scene.saveToServer')
+        }, {
             // separator
         }, {
             text: localize('menu.file.import', { ellipsis: true }),
