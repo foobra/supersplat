@@ -1,0 +1,13 @@
+[project]
+name = "supersplat-upload-server"
+version = "0.1.0"
+description = "Local upload server for SuperSplat"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.128.0",
+    "uvicorn>=0.40.0",
+    "python-multipart>=0.0.9",
+]
+
+[tool.uv]
+package = false
